@@ -1,5 +1,5 @@
 from flask import jsonify, request, g
-from app import app, db, mail
+from extensions import app, db, mail
 from models import User, Booking, TurfConfig
 from flask_mail import Message
 from twilio.rest import Client
@@ -40,14 +40,23 @@ def get_turf_config_from_db():
     """Helper function to get turf configuration from database"""
     config = TurfConfig.query.first()
     if not config:
-        return None
+        # Initialize with sample data if no config exists
+        from init_sample_data import init_sample_data
+        init_sample_data()
+        db.session.commit()
+        config = TurfConfig.query.first()
     return {
+        'id': config.id,
         'name': config.name,
         'details': config.details,
         'location': config.location,
         'phone': config.phone,
         'email': config.email,
         'sports_available': config.sports_available,
+        'price_details': config.price_details,
+        'images': config.images,
+        'special_offers': config.special_offers,
+        'last_updated': config.last_updated.isoformat() if config.last_updated else None,
         'price_details': config.price_details,
         'images': config.images,
         'special_offers': config.special_offers

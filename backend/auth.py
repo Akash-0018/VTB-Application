@@ -2,7 +2,7 @@ from functools import wraps
 from flask import jsonify, request, g
 import jwt
 from datetime import datetime, timedelta
-from app import app, db
+from extensions import app, db
 from models import User
 
 def create_token(user_id):

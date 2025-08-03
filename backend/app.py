@@ -1,17 +1,10 @@
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
-from flask_mail import Mail
-from flask_cors import CORS
-from config import Config
+from extensions import app, db
 
-app = Flask(__name__)
-app.config.from_object(Config)
-app.config['SECRET_KEY'] = 'VTB-secret-key-2025'  # Change this in production
+# Import and register blueprints
+from admin_routes import admin_routes
+app.register_blueprint(admin_routes, url_prefix='/api/admin')
 
-db = SQLAlchemy(app)
-mail = Mail(app)
-CORS(app)
-
+# Import routes after blueprint registration
 from routes import *
 
 if __name__ == '__main__':
