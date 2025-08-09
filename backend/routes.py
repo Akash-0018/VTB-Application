@@ -1,10 +1,11 @@
 from flask import jsonify, request, g
 from extensions import app, db, mail
-from models import User, Booking, TurfConfig
+from models import User, Booking, TurfConfig, Testimonial, ActivityLog, SiteStats
 from flask_mail import Message
 from twilio.rest import Client
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from auth import token_required, admin_required, create_token
+from sqlalchemy import func
 
 # Default turf config as a fallback
 TURF_CONFIG = {
@@ -17,7 +18,7 @@ TURF_CONFIG = {
     - Refreshment counter
     - First aid facility''',
     'location': 'https://maps.google.com/?q=12.9716,77.5946',
-    'email': 'admin@sportzone.com',  # changed to email for consistency
+    'email': 'admin@sportzone.com',
     'phone': '+1234567890',
     'price_details': {
         'weekday': {
@@ -36,15 +37,28 @@ TURF_CONFIG = {
     'special_offers': []
 }
 
+# Activity logging helper function
+def log_activity(user_id, action_type, description, sport=None, booking_id=None, meta_data=None):
+    """Helper function to log user activities"""
+    try:
+        activity = ActivityLog(
+            user_id=user_id,
+            action_type=action_type,
+            action_description=description,
+            sport=sport,
+            booking_id=booking_id,
+            meta_data=meta_data
+        )
+        db.session.add(activity)
+        db.session.commit()
+    except Exception as e:
+        print(f"Error logging activity: {str(e)}")
+
 def get_turf_config_from_db():
     """Helper function to get turf configuration from database"""
     config = TurfConfig.query.first()
     if not config:
-        # Initialize with sample data if no config exists
-        from init_sample_data import init_sample_data
-        init_sample_data()
-        db.session.commit()
-        config = TurfConfig.query.first()
+        return TURF_CONFIG
     return {
         'id': config.id,
         'name': config.name,
@@ -56,10 +70,7 @@ def get_turf_config_from_db():
         'price_details': config.price_details,
         'images': config.images,
         'special_offers': config.special_offers,
-        'last_updated': config.last_updated.isoformat() if config.last_updated else None,
-        'price_details': config.price_details,
-        'images': config.images,
-        'special_offers': config.special_offers
+        'last_updated': config.last_updated.isoformat() if config.last_updated else None
     }
 
 # Initialize admin user
@@ -79,110 +90,167 @@ def init_admin():
         db.session.commit()
         print("Admin user created successfully!")
 
-# Authentication routes
+# ============================================================================
+# AUTHENTICATION ROUTES
+# ============================================================================
+
 @app.route('/api/register', methods=['POST'])
 def register():
-    data = request.json
-    if User.query.filter_by(username=data['username']).first():
-        return jsonify({'message': 'Username already exists'}), 400
+    try:
+        data = request.json
+        if User.query.filter_by(username=data['username']).first():
+            return jsonify({'message': 'Username already exists'}), 400
 
-    if User.query.filter_by(email=data['email']).first():
-        return jsonify({'message': 'Email already registered'}), 400
+        if User.query.filter_by(email=data['email']).first():
+            return jsonify({'message': 'Email already registered'}), 400
 
-    user = User(
-        username=data['username'],
-        email=data['email'],
-        name=data['name'],
-        phone=data['phone'],
-        team_name=data.get('team_name', '')
-    )
-    user.set_password(data['password'])
-    db.session.add(user)
-    db.session.commit()
+        user = User(
+            username=data['username'],
+            email=data['email'],
+            name=data['name'],
+            phone=data['phone'],
+            team_name=data.get('team_name', '')
+        )
+        user.set_password(data['password'])
+        db.session.add(user)
+        db.session.commit()
 
-    token = create_token(user.id)
-    return jsonify({
-        'token': token,
-        'user': {
-            'id': user.id,
-            'username': user.username,
-            'name': user.name,
-            'email': user.email,
-            'phone': user.phone,
-            'team_name': user.team_name,
-            'is_admin': user.is_admin
-        }
-    }), 201
+        # Log registration activity
+        log_activity(
+            user_id=user.id,
+            action_type='user_registered',
+            description=f"registered as new user",
+            meta_data={'registration_method': 'web'}
+        )
+
+        token = create_token(user.id)
+        return jsonify({
+            'token': token,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'name': user.name,
+                'email': user.email,
+                'phone': user.phone,
+                'team_name': user.team_name,
+                'is_admin': user.is_admin
+            }
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': f'Registration error: {str(e)}'}), 500
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    data = request.json
-    user = User.query.filter_by(username=data['username']).first()
-
-    if not user or not user.check_password(data['password']):
-        return jsonify({'message': 'Invalid username or password'}), 401
-
-    token = create_token(user.id)
-    return jsonify({
-        'token': token,
-        'user': {
-            'id': user.id,
-            'username': user.username,
-            'name': user.name,
-            'email': user.email,
-            'phone': user.phone,
-            'team_name': user.team_name,
-            'is_admin': user.is_admin
-        }
-    })
-
-# Helper functions
-def send_whatsapp_message(to_number, message):
     try:
-        client = Client(app.config['TWILIO_ACCOUNT_SID'], app.config['TWILIO_AUTH_TOKEN'])
-        msg = client.messages.create(
-            from_=f"whatsapp:{app.config['TWILIO_WHATSAPP_NUMBER']}",
-            body=message,
-            to=f"whatsapp:{to_number}"
-        )
-        return True
-    except Exception as e:
-        print(f"WhatsApp Error: {str(e)}")
-        return False
+        data = request.json
+        user = User.query.filter_by(username=data['username']).first()
 
-def send_email(subject, body):
+        if not user or not user.check_password(data['password']):
+            return jsonify({'message': 'Invalid username or password'}), 401
+
+        # Log login activity
+        log_activity(
+            user_id=user.id,
+            action_type='user_login',
+            description=f"logged into the system",
+            meta_data={'login_method': 'web'}
+        )
+
+        token = create_token(user.id)
+        return jsonify({
+            'token': token,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'name': user.name,
+                'email': user.email,
+                'phone': user.phone,
+                'team_name': user.team_name,
+                'is_admin': user.is_admin
+            }
+        })
+    except Exception as e:
+        return jsonify({'message': f'Login error: {str(e)}'}), 500
+
+# ============================================================================
+# FRONTEND API ENDPOINTS (Main endpoints your frontend needs)
+# ============================================================================
+
+@app.route('/api/turf-config', methods=['GET'])
+def get_turf_config():
+    """Get turf configuration for frontend"""
     try:
-        msg = Message(
-            subject,
-            sender=app.config['MAIL_USERNAME'],
-            recipients=[TURF_CONFIG['email']]
-        )
-        msg.body = body
-        mail.send(msg)
-        return True
+        turf = TurfConfig.query.first()
+        if not turf:
+            # Return default config if no custom config exists
+            return jsonify({
+                "name": "TurfZone Sports Complex",
+                "location": "123 Sports Avenue, Mumbai, Maharashtra - 400001",
+                "phone": "+91 9843464180",
+                "email": "contact@turfzone.com",
+                "sports_available": ["Football", "Cricket", "Basketball", "Tennis"],
+                "images": [
+                    "https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=800",
+                    "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=800",
+                    "https://images.unsplash.com/photo-1524015368236-bbf6f72545b6?w=800",
+                    "https://images.unsplash.com/photo-1542652184-04fe4ec9d5bb?w=800",
+                    "https://images.unsplash.com/photo-1577223625816-7546b31a2995?w=800"
+                ],
+                "special_offers": [
+                    {
+                        "title": "Weekend Special",
+                        "description": "20% off on weekend bookings"
+                    },
+                    {
+                        "title": "Early Bird",
+                        "description": "15% off on morning slots (6-10 AM)"
+                    },
+                    {
+                        "title": "Group Booking",
+                        "description": "25% off for teams of 10+ players"
+                    }
+                ]
+            }), 200
+        
+        return jsonify({
+            'name': turf.name,
+            'location': turf.location,
+            'phone': turf.phone,
+            'email': turf.email,
+            'sports_available': turf.sports_available,
+            'images': turf.images or [],
+            'special_offers': turf.special_offers or []
+        }), 200
     except Exception as e:
-        print(f"Email Error: {str(e)}")
-        return False
+        print(f"Error in get_turf_config: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
 
-# Routes
+# ============================================================================
+# TURF MANAGEMENT ROUTES
+# ============================================================================
+
 @app.route('/api/turf', methods=['GET'])
 def get_turf_info():
     """Get turf information including pricing and available sports"""
-    turf = TurfConfig.query.first()
-    if not turf:
-        return jsonify(TURF_CONFIG)  # Return default config if no custom config exists
+    try:
+        turf = TurfConfig.query.first()
+        if not turf:
+            return jsonify(TURF_CONFIG)
 
-    return jsonify({
-        'name': turf.name,
-        'details': turf.details,
-        'location': turf.location,
-        'phone': turf.phone,
-        'email': turf.email,
-        'sports_available': turf.sports_available,
-        'price_details': turf.price_details,
-        'images': turf.images,
-        'special_offers': turf.special_offers
-    })
+        return jsonify({
+            'name': turf.name,
+            'details': turf.details,
+            'location': turf.location,
+            'phone': turf.phone,
+            'email': turf.email,
+            'sports_available': turf.sports_available,
+            'price_details': turf.price_details,
+            'images': turf.images,
+            'special_offers': turf.special_offers
+        })
+    except Exception as e:
+        return jsonify({'message': f'Error fetching turf info: {str(e)}'}), 500
 
 @app.route('/api/turf', methods=['PUT'])
 @admin_required
@@ -222,174 +290,69 @@ def update_turf_info():
         db.session.commit()
         return jsonify({
             'message': 'Turf configuration updated successfully',
-            'data': {
-                'name': turf.name,
-                'details': turf.details,
-                'location': turf.location,
-                'phone': turf.phone,
-                'email': turf.email,
-                'sports_available': turf.sports_available,
-                'price_details': turf.price_details,
-                'images': turf.images,
-                'special_offers': turf.special_offers
-            }
+            'data': get_turf_config_from_db()
         })
     except Exception as e:
         db.session.rollback()
         return jsonify({'message': f'Error updating turf configuration: {str(e)}'}), 500
 
-@app.route('/api/turf/images', methods=['POST'])
+# ============================================================================
+# BOOKING MANAGEMENT ROUTES (FIXED)
+# ============================================================================
+
+@app.route('/api/bookings', methods=['GET'])
 @admin_required
-def add_turf_image():
-    """Add a new image URL to the turf configuration"""
+def get_all_bookings():
+    """Get all bookings (admin only) - COMPLETELY FIXED VERSION"""
     try:
-        data = request.json
-        if not data.get('image_url'):
-            return jsonify({'message': 'Image URL is required'}), 400
-
-        turf = TurfConfig.query.first()
-        if not turf:
-            return jsonify({'message': 'Turf configuration not found'}), 404
-
-        images = turf.images or []
-        if data['image_url'] in images:
-            return jsonify({'message': 'Image URL already exists'}), 400
-
-        images.append(data['image_url'])
-        turf.images = images
-        db.session.commit()
-
-        return jsonify({
-            'message': 'Image added successfully',
-            'data': turf.images
-        })
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'message': f'Error adding image: {str(e)}'}), 500
-
-@app.route('/api/turf/images/<int:index>', methods=['DELETE'])
-@admin_required
-def remove_turf_image(index):
-    """Remove an image from the turf configuration"""
-    try:
-        turf = TurfConfig.query.first()
-        if not turf or not turf.images:
-            return jsonify({'message': 'Image not found'}), 404
-
-        images = turf.images
-        try:
-            removed_image = images.pop(index)
-            turf.images = images
-            db.session.commit()
-            return jsonify({
-                'message': 'Image removed successfully',
-                'data': {
-                    'removed': removed_image,
-                    'remaining': turf.images
+        # Use proper join to avoid issues
+        bookings = db.session.query(Booking).join(User, Booking.user_id == User.id).order_by(Booking.booking_date.desc()).all()
+        
+        booking_data = []
+        for booking in bookings:
+            try:
+                booking_dict = {
+                    'id': booking.id,
+                    'user_id': booking.user_id,
+                    'sport': booking.sport,
+                    'booking_date': booking.booking_date.isoformat() if booking.booking_date else None,
+                    'start_time': booking.start_time.strftime('%H:%M') if booking.start_time else None,
+                    'end_time': booking.end_time.strftime('%H:%M') if booking.end_time else None,
+                    'status': booking.status,
+                    'notes': booking.notes,
+                    'admin_notes': booking.admin_notes,
+                    'created_at': booking.created_at.isoformat() if booking.created_at else None,
+                    'updated_at': booking.updated_at.isoformat() if booking.updated_at else None,
+                    'user_name': booking.user.name if booking.user else 'Unknown',
+                    'user_email': booking.user.email if booking.user else 'Unknown',
+                    'user_phone': booking.user.phone if booking.user else 'Unknown',
+                    'team_name': booking.user.team_name if booking.user else 'Unknown'
                 }
-            })
-        except IndexError:
-            return jsonify({'message': 'Image index out of range'}), 404
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'message': f'Error removing image: {str(e)}'}), 500
-
-@app.route('/api/bookings/user', methods=['GET'])
-@token_required
-def get_user_bookings():
-    """Get user's bookings"""
-    try:
-        user = g.user
-        bookings = Booking.query.filter_by(user_id=user.id).order_by(Booking.booking_date.desc()).all()
-        return jsonify([{
-            'id': booking.id,
-            'sport': booking.sport,
-            'booking_date': booking.booking_date.strftime('%Y-%m-%d'),
-            'start_time': booking.start_time.strftime('%H:%M'),
-            'end_time': booking.end_time.strftime('%H:%M'),
-            'status': booking.status,
-            'admin_notes': booking.admin_notes
-        } for booking in bookings])
-    except Exception as e:
-        return jsonify({'message': f'Error fetching bookings: {str(e)}'}), 500
-
-@app.route('/api/turf/offers', methods=['POST'])
-@admin_required
-def add_special_offer():
-    """Add a new special offer"""
-    try:
-        data = request.json
-        required_fields = ['title', 'description', 'discount', 'valid_from', 'valid_until']
-        for field in required_fields:
-            if not data.get(field):
-                return jsonify({'message': f'Missing required field: {field}'}), 400
-
-        try:
-            valid_from = datetime.strptime(data['valid_from'], '%Y-%m-%d')
-            valid_until = datetime.strptime(data['valid_until'], '%Y-%m-%d')
-            if valid_until < valid_from:
-                return jsonify({'message': 'Valid until date must be after valid from date'}), 400
-        except ValueError:
-            return jsonify({'message': 'Invalid date format. Use YYYY-MM-DD'}), 400
-
-        turf = TurfConfig.query.first()
-        if not turf:
-            return jsonify({'message': 'Turf configuration not found'}), 404
-
-        offers = turf.special_offers or []
-        new_offer = {
-            'title': data['title'],
-            'description': data['description'],
-            'discount': data['discount'],
-            'valid_from': data['valid_from'],
-            'valid_until': data['valid_until']
-        }
-        offers.append(new_offer)
-        turf.special_offers = offers
-        db.session.commit()
-
+                booking_data.append(booking_dict)
+            except Exception as booking_error:
+                print(f"Error processing booking {booking.id}: {str(booking_error)}")
+                continue
+        
         return jsonify({
-            'message': 'Special offer added successfully',
-            'data': turf.special_offers
-        })
+            "success": True,
+            "data": booking_data
+        }), 200
     except Exception as e:
+        print(f"Error in get_all_bookings: {str(e)}")
         db.session.rollback()
-        return jsonify({'message': f'Error adding special offer: {str(e)}'}), 500
-
-@app.route('/api/turf/offers/<int:index>', methods=['DELETE'])
-@admin_required
-def remove_special_offer(index):
-    """Remove a special offer"""
-    try:
-        turf = TurfConfig.query.first()
-        if not turf or not turf.special_offers:
-            return jsonify({'message': 'Offer not found'}), 404
-
-        offers = turf.special_offers
-        try:
-            removed_offer = offers.pop(index)
-            turf.special_offers = offers
-            db.session.commit()
-            return jsonify({
-                'message': 'Special offer removed successfully',
-                'data': {
-                    'removed': removed_offer,
-                    'remaining': turf.special_offers
-                }
-            })
-        except IndexError:
-            return jsonify({'message': 'Offer index out of range'}), 404
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'message': f'Error removing special offer: {str(e)}'}), 500
+        return jsonify({
+            "success": False,
+            "message": "Error fetching bookings",
+            "error": str(e)
+        }), 500
 
 @app.route('/api/bookings', methods=['POST'])
 @token_required
 def create_booking():
-    """Create a new booking"""
+    """Create a new booking - ENHANCED VERSION"""
     try:
         data = request.json
-        current_user = g.user  # Set by token_required
+        current_user = g.user
 
         user = User.query.get(current_user.id)
         if not user:
@@ -412,7 +375,16 @@ def create_booking():
         db.session.add(booking)
         db.session.commit()
 
-        # Notifications AFTER commit
+        # Log the activity
+        log_activity(
+            user_id=current_user.id,
+            action_type='booking_created',
+            description=f"booked {data['sport']} turf for {data['start_time']}",
+            sport=data['sport'],
+            booking_id=booking.id
+        )
+
+        # Notifications
         email_subject = "New Turf Booking Request"
         email_body = f"""
         New booking request received:
@@ -442,14 +414,7 @@ def create_booking():
 
         return jsonify({
             'message': 'Booking created successfully',
-            'booking': {
-                'id': booking.id,
-                'sport': booking.sport,
-                'booking_date': booking.booking_date.strftime('%Y-%m-%d'),
-                'start_time': booking.start_time.strftime('%H:%M'),
-                'end_time': booking.end_time.strftime('%H:%M'),
-                'status': booking.status
-            }
+            'booking': booking.to_dict()
         }), 201
 
     except ValueError:
@@ -458,7 +423,19 @@ def create_booking():
         return jsonify({'message': f'Missing required field: {str(e)}'}), 400
     except Exception as e:
         db.session.rollback()
+        print(f"Error creating booking: {str(e)}")
         return jsonify({'message': f'Error creating booking: {str(e)}'}), 500
+
+@app.route('/api/bookings/user', methods=['GET'])
+@token_required
+def get_user_bookings():
+    """Get user's bookings"""
+    try:
+        user = g.user
+        bookings = Booking.query.filter_by(user_id=user.id).order_by(Booking.booking_date.desc()).all()
+        return jsonify([booking.to_dict() for booking in bookings])
+    except Exception as e:
+        return jsonify({'message': f'Error fetching bookings: {str(e)}'}), 500
 
 @app.route('/api/bookings/<int:booking_id>/status', methods=['PUT'])
 @admin_required
@@ -467,9 +444,20 @@ def update_booking_status(booking_id):
     try:
         data = request.json
         booking = Booking.query.get_or_404(booking_id)
+        old_status = booking.status
         booking.status = data['status']
         booking.admin_notes = data.get('admin_notes', '')
         db.session.commit()
+
+        # Log the status change
+        log_activity(
+            user_id=booking.user_id,
+            action_type='booking_status_updated',
+            description=f"booking status changed from {old_status} to {booking.status}",
+            sport=booking.sport,
+            booking_id=booking.id,
+            meta_data={'old_status': old_status, 'new_status': booking.status}
+        )
 
         # Get user info for notification
         user = User.query.get(booking.user_id)
@@ -491,67 +479,41 @@ def update_booking_status(booking_id):
         db.session.rollback()
         return jsonify({'message': f'Error updating booking status: {str(e)}'}), 500
 
-@app.route('/api/bookings', methods=['GET'])
-@admin_required
-def get_all_bookings():
-    """Get all bookings (admin only)"""
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+def send_whatsapp_message(to_number, message):
     try:
-        bookings = Booking.query.join(User).order_by(Booking.booking_date.desc()).all()
-        return jsonify([{
-            'id': booking.id,
-            'booking_date': booking.booking_date.strftime('%Y-%m-%d'),
-            'start_time': booking.start_time.strftime('%H:%M'),
-            'end_time': booking.end_time.strftime('%H:%M'),
-            'sport': booking.sport,
-            'status': booking.status,
-            'admin_notes': booking.admin_notes,
-            'team_name': booking.user.team_name,
-            'user_name': booking.user.name,
-            'user_email': booking.user.email,
-            'user_phone': booking.user.phone
-        } for booking in bookings])
+        if not hasattr(app.config, 'TWILIO_ACCOUNT_SID'):
+            print("WhatsApp functionality not configured")
+            return False
+            
+        client = Client(app.config['TWILIO_ACCOUNT_SID'], app.config['TWILIO_AUTH_TOKEN'])
+        msg = client.messages.create(
+            from_=f"whatsapp:{app.config['TWILIO_WHATSAPP_NUMBER']}",
+            body=message,
+            to=f"whatsapp:{to_number}"
+        )
+        return True
     except Exception as e:
-        return jsonify({'message': f'Error fetching bookings: {str(e)}'}), 500
+        print(f"WhatsApp Error: {str(e)}")
+        return False
 
-@app.route('/api/bookings/date/<date>', methods=['GET'])
-def get_bookings_by_date(date):
-    """Get all bookings for a specific date"""
+def send_email(subject, body):
     try:
-        date_obj = datetime.strptime(date, '%Y-%m-%d').date()
-        bookings = Booking.query.filter_by(booking_date=date_obj).all()
-        return jsonify([{
-            'id': b.id,
-            'name': b.name if hasattr(b, 'name') else 'Unknown',
-            'team_name': b.team_name,
-            'sport': b.sport,
-            'start_time': b.start_time.strftime('%H:%M'),
-            'end_time': b.end_time.strftime('%H:%M'),
-            'status': b.status
-        } for b in bookings])
-    except ValueError:
-        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
-
-@app.route('/api/bookings/upcoming', methods=['GET'])
-def get_upcoming_bookings():
-    """Get all upcoming bookings"""
-    today = datetime.now().date()
-    bookings = Booking.query.filter(
-        Booking.booking_date >= today
-    ).order_by(Booking.booking_date, Booking.start_time).all()
-
-    result = []
-    for b in bookings:
-        user = User.query.get(b.user_id)
-        result.append({
-            'id': b.id,
-            'name': user.name if user else 'Unknown',
-            'team_name': b.team_name,
-            'sport': b.sport,
-            'booking_date': b.booking_date.strftime('%Y-%m-%d'),
-            'start_time': b.start_time.strftime('%H:%M'),
-            'end_time': b.end_time.strftime('%H:%M'),
-            'status': b.status,
-            'admin_notes': b.admin_notes
-        })
-
-    return jsonify(result)
+        if not hasattr(app.config, 'MAIL_USERNAME'):
+            print("Email functionality not configured")
+            return False
+            
+        msg = Message(
+            subject,
+            sender=app.config['MAIL_USERNAME'],
+            recipients=[TURF_CONFIG['email']]
+        )
+        msg.body = body
+        mail.send(msg)
+        return True
+    except Exception as e:
+        print(f"Email Error: {str(e)}")
+        return False

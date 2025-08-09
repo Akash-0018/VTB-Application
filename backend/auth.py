@@ -15,16 +15,22 @@ def create_token(user_id):
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        print("🔒 Checking authentication token...")
         token = request.headers.get('Authorization')
         if not token:
+            print("❌ No token found in Authorization header")
             return jsonify({'message': 'Token is missing'}), 401
         
         try:
+            print(f"🔑 Processing token: {token[:15]}...")
             token = token.split(' ')[1]  # Remove 'Bearer ' prefix
             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+            print(f"👤 Decoded user_id: {data.get('user_id')}")
             user = User.query.get(data['user_id'])
             if not user:
+                print(f"❌ User {data.get('user_id')} not found in database")
                 return jsonify({'message': 'User not found'}), 401
+            print(f"✅ User authenticated: {user.username} (admin: {user.is_admin})")
             # Set both g.user and g.current_user for compatibility
             g.user = user
             g.current_user = user
