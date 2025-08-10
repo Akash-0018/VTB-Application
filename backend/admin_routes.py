@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import csv
 import io
 from extensions import db
-from models import Booking, TurfConfig, User, Testimonial, ActivityLog, SiteStats
+from models import Booking, TurfConfig, User, Testimonial, ActivityLog, SiteStats, TimeSlot
 from auth import admin_required, token_required
 import pandas as pd
 
@@ -158,6 +158,36 @@ def get_booking_stats():
         'monthlyStats': monthly_stats,
         'turfImages': turf_images
     })
+
+# BOOKING SLOT MANAGEMENT
+@admin_routes.route('/available-slots', methods=['GET'])
+def get_available_slots():
+    try:
+        date_str = request.args.get('date')
+        if not date_str:
+            return jsonify({'message': 'Date is required'}), 400
+            
+        date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        current_time = datetime.now().time()
+        
+        # Get all slots for the given date
+        slots = TimeSlot.query.filter(
+            TimeSlot.date == date,
+            TimeSlot.is_available == True
+        ).order_by(TimeSlot.start_time).all()
+        
+        # If it's today, only show future slots
+        if date == datetime.now().date():
+            slots = [slot for slot in slots if slot.start_time > current_time]
+        
+        return jsonify([{
+            'time': f"{slot.start_time.strftime('%H:%M')}-{slot.end_time.strftime('%H:%M')}",
+            'available': True,
+            'sports': TurfConfig.query.first().sports_available
+        } for slot in slots])
+    except Exception as e:
+        print(f"Error getting available slots: {str(e)}")
+        return jsonify({'message': f'Error fetching slots: {str(e)}'}), 500
 
 # NEW ENDPOINTS FOR TESTIMONIALS
 @admin_routes.route('/testimonials', methods=['GET'])

@@ -1,10 +1,36 @@
 from app import db
-from models import TurfConfig
-from datetime import datetime
+from models import TurfConfig, TimeSlot
+from datetime import datetime, timedelta
 
 def init_sample_data():
-    # Clear existing turf config
+    # Clear existing data
     TurfConfig.query.delete()
+    TimeSlot.query.delete()
+    
+    # Create time slots for the next 7 days
+    sports = ["Football", "Cricket", "Basketball", "Tennis", "Badminton", "Volleyball"]
+    time_slots = [
+        ("06:00", "08:00"),
+        ("08:00", "10:00"),
+        ("10:00", "12:00"),
+        ("14:00", "16:00"),
+        ("16:00", "18:00"),
+        ("18:00", "20:00"),
+        ("20:00", "22:00")
+    ]
+    
+    for i in range(7):  # Next 7 days
+        date = datetime.now().date() + timedelta(days=i)
+        for sport in sports:
+            for start, end in time_slots:
+                slot = TimeSlot(
+                    sport=sport,
+                    date=date,
+                    start_time=datetime.strptime(start, '%H:%M').time(),
+                    end_time=datetime.strptime(end, '%H:%M').time(),
+                    is_available=True
+                )
+                db.session.add(slot)
     
     # Sample turf images (using publicly available sports turf images)
     dummy_images = [

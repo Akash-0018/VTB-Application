@@ -1,6 +1,6 @@
 from flask import jsonify, request, g
 from extensions import app, db, mail
-from models import User, Booking, TurfConfig, Testimonial, ActivityLog, SiteStats
+from models import User, Booking, TurfConfig, Testimonial, ActivityLog, SiteStats, TimeSlot
 from flask_mail import Message
 from twilio.rest import Client
 from datetime import datetime, date, timedelta
@@ -346,10 +346,69 @@ def get_all_bookings():
             "error": str(e)
         }), 500
 
+@app.route('/api/available-slots', methods=['GET'])
+def get_available_slots():
+    """Get available time slots for a specific date"""
+    try:
+        date_str = request.args.get('date')
+        if not date_str:
+            return jsonify({'message': 'Date is required'}), 400
+            
+        date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        current_time = datetime.now().time()
+        
+        # Get sports configuration
+        turf_config = TurfConfig.query.first()
+        if not turf_config:
+            return jsonify({'message': 'Turf configuration not found'}), 500
+
+        # Prepare time slots
+        time_slots = [
+            {'start': '06:00', 'end': '08:00'},
+            {'start': '08:00', 'end': '10:00'},
+            {'start': '10:00', 'end': '12:00'},
+            {'start': '14:00', 'end': '16:00'},
+            {'start': '16:00', 'end': '18:00'},
+            {'start': '18:00', 'end': '20:00'},
+            {'start': '20:00', 'end': '22:00'}
+        ]
+
+        # Get existing bookings for the date
+        bookings = Booking.query.filter_by(booking_date=date).all()
+        booked_slots = {(booking.start_time.strftime('%H:%M'), booking.end_time.strftime('%H:%M'), booking.sport): True 
+                       for booking in bookings if booking.status != 'cancelled'}
+
+        # Format response
+        formatted_slots = []
+        for slot in time_slots:
+            # Skip past slots if date is today
+            if date == datetime.now().date():
+                slot_start = datetime.strptime(slot['start'], '%H:%M').time()
+                if slot_start <= current_time:
+                    continue
+            
+            # Check availability for each sport
+            available_sports = []
+            for sport in turf_config.sports_available:
+                if not booked_slots.get((slot['start'], slot['end'], sport), False):
+                    available_sports.append(sport)
+            
+            if available_sports:  # Only include slot if at least one sport is available
+                formatted_slots.append({
+                    'start_time': slot['start'],
+                    'end_time': slot['end'],
+                    'sports': available_sports
+                })
+
+        return jsonify(formatted_slots)
+    except Exception as e:
+        print(f"Error in get_available_slots: {str(e)}")
+        return jsonify({'message': f'Error fetching slots: {str(e)}'}), 500
+
 @app.route('/api/bookings', methods=['POST'])
 @token_required
 def create_booking():
-    """Create a new booking - ENHANCED VERSION"""
+    """Create a new booking with slot validation and email notification"""
     try:
         data = request.json
         current_user = g.user
@@ -363,17 +422,53 @@ def create_booking():
             user.team_name = data['team_name']
             db.session.add(user)
 
+        # Check if slot is available
+        slot = TimeSlot.query.filter_by(
+            sport=data['sport'],
+            date=datetime.strptime(data['booking_date'], '%Y-%m-%d').date(),
+            start_time=datetime.strptime(data['start_time'], '%H:%M').time(),
+            end_time=datetime.strptime(data['end_time'], '%H:%M').time(),
+            is_available=True
+        ).first()
+
+        if not slot:
+            return jsonify({'message': 'Selected time slot is not available'}), 400
+
         booking = Booking(
             user_id=current_user.id,
             sport=data['sport'],
             booking_date=datetime.strptime(data['booking_date'], '%Y-%m-%d').date(),
             start_time=datetime.strptime(data['start_time'], '%H:%M').time(),
             end_time=datetime.strptime(data['end_time'], '%H:%M').time(),
-            status='pending'
+            status='pending',
+            notes=data.get('notes', '')
         )
 
+        # Mark slot as unavailable
+        slot.is_available = False
+        slot.booking_id = booking.id
+
         db.session.add(booking)
+        db.session.add(slot)
         db.session.commit()
+
+        # Send email notification to admin
+        email_subject = "New Booking Request"
+        email_body = f"""
+New booking request received from {user.name}
+
+Details:
+- Sport: {booking.sport}
+- Date: {booking.booking_date.strftime('%Y-%m-%d')}
+- Time: {booking.start_time.strftime('%H:%M')} - {booking.end_time.strftime('%H:%M')}
+- Team: {user.team_name}
+- Contact: {user.phone}
+- Email: {user.email}
+- Notes: {booking.notes}
+
+Please review and confirm this booking in the admin dashboard.
+"""
+        send_email(email_subject, email_body)
 
         # Log the activity
         log_activity(
@@ -440,14 +535,54 @@ def get_user_bookings():
 @app.route('/api/bookings/<int:booking_id>/status', methods=['PUT'])
 @admin_required
 def update_booking_status(booking_id):
-    """Update booking status"""
+    """Update booking status and handle slot availability"""
     try:
         data = request.json
         booking = Booking.query.get_or_404(booking_id)
         old_status = booking.status
-        booking.status = data['status']
+        new_status = data['status']
+        booking.status = new_status
         booking.admin_notes = data.get('admin_notes', '')
+
+        # Get associated time slot
+        slot = TimeSlot.query.filter_by(
+            sport=booking.sport,
+            date=booking.booking_date,
+            start_time=booking.start_time,
+            end_time=booking.end_time
+        ).first()
+
+        if slot:
+            # Update slot availability based on booking status
+            if new_status == 'cancelled' or new_status == 'rejected':
+                slot.is_available = True
+                slot.booking_id = None
+            elif new_status == 'confirmed':
+                slot.is_available = False
+                slot.booking_id = booking.id
+
         db.session.commit()
+
+        # Send email notification to user
+        user = User.query.get(booking.user_id)
+        if user:
+            email_subject = f"Booking {booking.status.title()}"
+            email_body = f"""
+Dear {user.name},
+
+Your booking request has been {booking.status}:
+
+Details:
+- Sport: {booking.sport}
+- Date: {booking.booking_date.strftime('%Y-%m-%d')}
+- Time: {booking.start_time.strftime('%H:%M')} - {booking.end_time.strftime('%H:%M')}
+- Team: {user.team_name}
+
+{f"Admin Notes: {booking.admin_notes}" if booking.admin_notes else ""}
+
+Thank you for using our service!
+"""
+            send_email(email_subject, email_body, recipients=[user.email])
 
         # Log the status change
         log_activity(
@@ -500,20 +635,25 @@ def send_whatsapp_message(to_number, message):
         print(f"WhatsApp Error: {str(e)}")
         return False
 
-def send_email(subject, body):
+def send_email(subject, body, recipients=None):
     try:
-        if not hasattr(app.config, 'MAIL_USERNAME'):
-            print("Email functionality not configured")
-            return False
+        if recipients is None:
+            recipients = ['akashgunasekar585@gmail.com']
             
+        print(f"Sending email to {recipients}")
+        print(f"Subject: {subject}")
+        print(f"Body: {body}")
+        
         msg = Message(
             subject,
-            sender=app.config['MAIL_USERNAME'],
-            recipients=[TURF_CONFIG['email']]
+            sender='akashgunasekar585@gmail.com',
+            recipients=recipients
         )
         msg.body = body
         mail.send(msg)
+        print("Email sent successfully!")
         return True
     except Exception as e:
         print(f"Email Error: {str(e)}")
+        print(f"Mail settings: {app.config.get_namespace('MAIL_')}")
         return False

@@ -159,6 +159,27 @@ class ActivityLog(db.Model):
         else:
             return "Just now"
 
+class TimeSlot(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    sport = db.Column(db.String(50), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time, nullable=False)
+    is_available = db.Column(db.Boolean, default=True)
+    booking_id = db.Column(db.Integer, db.ForeignKey('booking.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'sport': self.sport,
+            'date': self.date.isoformat(),
+            'start_time': self.start_time.strftime('%H:%M'),
+            'end_time': self.end_time.strftime('%H:%M'),
+            'is_available': self.is_available
+        }
+
 class SiteStats(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     stat_name = db.Column(db.String(50), unique=True, nullable=False)
