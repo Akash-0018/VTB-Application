@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 import traceback
@@ -7,23 +7,31 @@ import traceback
 from extensions import app, db
 
 # Enable CORS for React frontend
-CORS(app, resources={
-    r"/api/*": {
-        "origins": ["http://localhost:3000"],
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization", "Accept", 
-                         "Access-Control-Allow-Origin", "Access-Control-Allow-Credentials"],
-        "supports_credentials": True,
-        "expose_headers": ["Content-Range", "X-Content-Range", "Content-Type", "Authorization"]
-    }
-})
+CORS(app, supports_credentials=True)
+
+# Configure CORS parameters
+app.config['CORS_HEADERS'] = 'Content-Type'
+
+# Add CORS headers to all responses
+@app.after_request
+def after_request(response):
+    origin = request.headers.get('Origin')
+    if origin and origin == 'http://localhost:3000':
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Max-Age', '3600')
+    return response
 
 # Import and register blueprints
 from admin_routes import admin_routes
 from activity_routes import activity_routes
+from payment_blueprint import payment_routes
 
 app.register_blueprint(admin_routes, url_prefix='/api/admin')
 app.register_blueprint(activity_routes, url_prefix='/api')
+app.register_blueprint(payment_routes, url_prefix='/api')
 
 # Import routes after blueprint registration
 try:
