@@ -1,0 +1,153 @@
+.App {
+  text-align: center;
+}
+
+/* Hero Section */
+.hero-section {
+  background: linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)), url('https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=1600');
+  background-size: cover;
+  background-position: center;
+  color: white;
+  padding: 100px 0;
+}
+
+/* Carousel */
+.carousel-image {
+  height: 400px;
+  object-fit: cover;
+}
+
+/* Card Animations */
+.card {
+  transition: transform 0.3s ease-in-out;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+/* Button Styles */
+.btn-primary {
+  background: var(--primary-color);
+  border: none;
+  padding: 10px 25px;
+  transition: all 0.3s ease;
+}
+
+.btn-primary:hover {
+  background: var(--secondary-color);
+  transform: translateY(-2px);
+}
+
+/* Badge Styles */
+.badge {
+  padding: 8px 15px;
+  margin: 4px;
+  font-size: 0.9em;
+  transition: all 0.3s ease;
+}
+
+.badge:hover {
+  transform: scale(1.1);
+}
+
+/* Dashboard Stats */
+.stats-card {
+  background: linear-gradient(45deg, var(--primary-color), var(--secondary-color));
+  color: white;
+  border: none;
+}
+
+/* Table Styles */
+.table {
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.table thead {
+  background: var(--primary-color);
+  color: white;
+}
+
+/* Image Gallery */
+.image-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 20px;
+  padding: 20px;
+}
+
+/* Animation Classes */
+.fade-in {
+  animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.image-hover {
+  transition: transform 0.3s ease-in-out, filter 0.3s ease-in-out;
+}
+
+.image-hover:hover {
+  transform: scale(1.05);
+  filter: brightness(1.1);
+}
+
+/* Loading animation */
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.loading-pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Custom scrollbar track */
+::-webkit-scrollbar-track {
+  background: rgba(37, 99, 235, 0.05);
+  border-radius: 8px;
+}
+
+/* Custom scrollbar thumb */
+::-webkit-scrollbar-thumb {
+  background: rgba(37, 99, 235, 0.3);
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(37, 99, 235, 0.5);
+}
+
+/* Alert animations */
+.MuiAlert-root {
+  animation: slideDown 0.3s ease-in-out;
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
