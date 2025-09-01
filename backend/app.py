@@ -2,26 +2,44 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 import traceback
+from datetime import datetime
+from utils.cors_handler import handle_preflight, add_cors_headers
 
-# Import extensions first
-from extensions import app, db
+# Create the Flask app first
+app = Flask(__name__)
 
-# Enable CORS for React frontend
-CORS(app, supports_credentials=True)
+# Enable CORS for React frontend with specific configuration
+CORS(app, 
+     resources={r"/api/*": {
+         "origins": ["http://localhost:3000"],
+         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+         "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+         "expose_headers": ["Content-Type", "Authorization"],
+         "supports_credentials": True,
+         "send_wildcard": False,
+         "max_age": 3600
+     }},
+     supports_credentials=True)
 
-# Configure CORS parameters
-app.config['CORS_HEADERS'] = 'Content-Type'
+# Handle preflight requests for all routes
+@app.before_request
+def before_request():
+    if request.method == 'OPTIONS':
+        return handle_preflight()
 
-# Add CORS headers to all responses
+# Import extensions
+from extensions import db
+
+# Add CORS and security headers to all responses
 @app.after_request
 def after_request(response):
-    origin = request.headers.get('Origin')
-    if origin and origin == 'http://localhost:3000':
-        response.headers.add('Access-Control-Allow-Origin', origin)
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
-        response.headers.add('Access-Control-Max-Age', '3600')
+    # Set basic security headers
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    
+    # Add CORS headers
+    response = add_cors_headers(response)
     return response
 
 # Import and register blueprints

@@ -2,9 +2,21 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_mail import Mail
+from flask_cors import CORS
 
 # Initialize Flask app
 app = Flask(__name__)
+
+# Initialize CORS
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ["http://localhost:3000"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+        "expose_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
+    }
+}, supports_credentials=True)
 
 # Configuration
 app.config['SECRET_KEY'] = 'your-secret-key-here'

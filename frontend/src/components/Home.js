@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Box, Typography, Button, Card, List, ListItem, ListItemText, Grid, Chip, Avatar, Fab, Rating } from '@mui/material';
-import axios from 'axios';
+import { Container, Box, Typography, Button, Card, List, ListItem, ListItemText, Chip, Avatar, Fab, Rating } from '@mui/material';
+import Grid from '@mui/material/Grid';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import api from '../utils/axios';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import PhoneIcon from '@mui/icons-material/Phone';
@@ -135,9 +136,8 @@ const Home = () => {
 
   const fetchTurfConfig = async () => {
     try {
-      const response = await fetch('/api/turf-config');
-      const data = await response.json();
-      setTurfConfig(data);
+      const response = await api.get('/turf-config');
+      setTurfConfig(response.data);
       setLoading(false);
     } catch (error) {
       console.error('Error fetching turf config:', error);
@@ -147,8 +147,8 @@ const Home = () => {
 
   const fetchRealStats = async () => {
     try {
-      const response = await fetch('/api/stats');
-      const data = await response.json();
+      const response = await api.get('/stats');
+      const data = response.data;
       
       if (data.data_source === 'real' && (data.total_customers > 0 || data.total_bookings > 0)) {
         setRealStatsLoaded(true);
@@ -168,8 +168,8 @@ const Home = () => {
 
   const fetchLiveActivity = async () => {
     try {
-      const response = await fetch('/api/live-activity');
-      const data = await response.json();
+      const response = await api.get('/live-activity');
+      const data = response.data;
       
       if (data && data.length > 0) {
         setLiveActivity(data);
@@ -181,8 +181,8 @@ const Home = () => {
 
   const fetchTestimonials = async () => {
     try {
-      const response = await fetch('/api/testimonials');
-      const data = await response.json();
+      const response = await api.get('/testimonials');
+      const data = response.data;
       
       if (data && data.length > 0) {
         const testimonialsWithAvatars = data.map(testimonial => ({
@@ -214,9 +214,9 @@ const Home = () => {
       const weekendDate = weekend.toISOString().split('T')[0];
 
       const [todaySlots, tomorrowSlots, weekendSlots] = await Promise.all([
-        axios.get(`${API_BASE_URL}/available-slots?date=${today}`),
-        axios.get(`${API_BASE_URL}/available-slots?date=${tomorrowDate}`),
-        axios.get(`${API_BASE_URL}/available-slots?date=${weekendDate}`)
+        api.get(`/available-slots?date=${today}`),
+        api.get(`/available-slots?date=${tomorrowDate}`),
+        api.get(`/available-slots?date=${weekendDate}`)
       ]);
 
       const processSlotsData = (slotsData) => {

@@ -5,6 +5,7 @@ from models import User, Booking, Testimonial, ActivityLog, TurfConfig
 from auth import token_required
 import random
 from sqlalchemy import func
+from flask_cors import cross_origin
 
 activity_routes = Blueprint('activity', __name__)
 

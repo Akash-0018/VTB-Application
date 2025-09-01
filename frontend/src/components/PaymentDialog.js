@@ -18,7 +18,7 @@ import {
 } from '@mui/material';
 import axios from 'axios';
 import { motion } from 'framer-motion';
-import PhoneIcon from '@mui/icons-material/Phone';rm 
+import PhoneIcon from '@mui/icons-material/Phone';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import PaymentsIcon from '@mui/icons-material/Payments';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
@@ -48,23 +48,49 @@ const PaymentDialog = ({ open, onClose, bookingDetails }) => {
       setError(null);
 
       const token = localStorage.getItem('token');
-      const response = await axios.post(
-        `${API_BASE_URL}/calculate-price`, 
-        {
+      if (!token) {
+        setError('Authentication token not found. Please log in again.');
+        return;
+      }
+
+      // Get start time from time slot
+      const [startTime] = bookingDetails.timeSlot.split(' - ');
+
+      const response = await axios({
+        method: 'post',
+        url: `${API_BASE_URL}/calculate-price`,
+        data: {
           sport: bookingDetails.sport,
           date: bookingDetails.date,
           timeSlot: bookingDetails.timeSlot,
-          team: bookingDetails.team
+          team: bookingDetails.team,
+          start_time: startTime
         },
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
-      );
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        withCredentials: true
+      });
 
-      setPriceDetails(response.data);
+      if (response.data) {
+        setPriceDetails(response.data);
+      } else {
+        setError('Invalid response from server');
+      }
     } catch (error) {
       console.error('Error fetching price details:', error);
-      setError('Unable to calculate price. Please try again.');
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        setError(error.response.data.message || 'Error calculating price. Please try again.');
+      } else if (error.request) {
+        // The request was made but no response was received
+        setError('No response from server. Please check your connection.');
+      } else {
+        // Something happened in setting up the request
+        setError('Unable to calculate price. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -72,19 +98,18 @@ const PaymentDialog = ({ open, onClose, bookingDetails }) => {
 
   const handleUPIPayment = async (app = 'default') => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/initiate-payment`, {
-        bookingDetails,
-        amount: priceDetails.finalAmount
-      });
-
-      const upiLinks = response.data.upiLinks;
-      const upiURL = upiLinks[app] || upiLinks.default;
-      
-      // Create booking first
+      // Check for authentication token
       const token = localStorage.getItem('token');
-      const bookingResponse = await axios.post(
-        `${API_BASE_URL}/bookings`,
-        {
+      if (!token) {
+        setError('Authentication token not found. Please log in again.');
+        return;
+      }
+
+      // Create booking first
+      const bookingResponse = await axios({
+        method: 'post',
+        url: `${API_BASE_URL}/bookings`,
+        data: {
           sport: bookingDetails.sport,
           booking_date: bookingDetails.date,
           start_time: bookingDetails.timeSlot.split(' - ')[0],
@@ -97,10 +122,33 @@ const PaymentDialog = ({ open, onClose, bookingDetails }) => {
             payment_status: 'pending'
           }
         },
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
-      );
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        withCredentials: true
+      });
+
+      // After booking is created, initiate payment
+      const paymentResponse = await axios({
+        method: 'post',
+        url: `${API_BASE_URL}/initiate-payment`,
+        data: {
+          bookingDetails: {
+            ...bookingDetails,
+            bookingId: bookingResponse.data.booking.id
+          },
+          amount: priceDetails.finalAmount
+        },
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        withCredentials: true
+      });
+
+      const upiLinks = paymentResponse.data.upiLinks;
+      const upiURL = upiLinks[app] || upiLinks.default;
 
       // Store booking ID for verification
       localStorage.setItem('pendingBookingId', bookingResponse.data.booking.id);

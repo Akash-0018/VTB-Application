@@ -104,62 +104,110 @@ def init_sample_data():
         }
     ]
 
-    # Sample price details
+    # Sample price details with updated structure
     price_details = {
         "Football": {
             "weekday": 1000,
             "weekend": 1500,
             "hourly": True,
-            "available_slots": time_slots
+            "available_slots": time_slots,
+            "peak_hours": {
+                "morning": "06:00-10:00",
+                "evening": "16:00-22:00"
+            }
         },
         "Cricket": {
             "weekday": 1500,
             "weekend": 2000,
             "hourly": True,
-            "available_slots": time_slots
+            "available_slots": time_slots,
+            "peak_hours": {
+                "morning": "06:00-10:00",
+                "evening": "16:00-22:00"
+            }
         },
         "Basketball": {
             "weekday": 800,
             "weekend": 1200,
             "hourly": True,
-            "available_slots": time_slots
+            "available_slots": time_slots,
+            "peak_hours": {
+                "morning": "06:00-10:00",
+                "evening": "16:00-22:00"
+            }
         },
         "Tennis": {
             "weekday": 600,
             "weekend": 800,
-            "hourly": True
+            "hourly": True,
+            "available_slots": time_slots,
+            "peak_hours": {
+                "morning": "06:00-10:00",
+                "evening": "16:00-22:00"
+            }
         },
         "Badminton": {
             "weekday": 400,
             "weekend": 600,
-            "hourly": True
+            "hourly": True,
+            "available_slots": time_slots,
+            "peak_hours": {
+                "morning": "06:00-10:00",
+                "evening": "16:00-22:00"
+            }
         },
         "Volleyball": {
             "weekday": 800,
             "weekend": 1000,
-            "hourly": True
+            "hourly": True,
+            "available_slots": time_slots,
+            "peak_hours": {
+                "morning": "06:00-10:00",
+                "evening": "16:00-22:00"
+            }
         }
     }
 
-    # Sample special offers
+    # Sample special offers with updated structure
     special_offers = [
         {
-            "title": "Early Bird Discount",
-            "description": "20% off on all morning slots (6 AM - 9 AM)",
+            "title": "Early Bird Special",
+            "description": "20% off on morning slots (6 AM - 10 AM)",
             "discount": 20,
-            "valid_until": "2025-12-31"
+            "valid_until": "2025-12-31",
+            "applicable_slots": ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00"],
+            "applicable_sports": ["Football", "Cricket", "Basketball", "Tennis", "Badminton", "Volleyball"],
+            "active": True
         },
         {
-            "title": "Weekend Package",
-            "description": "Book for 4 hours and get 1 hour free on weekends",
-            "discount": "1_hour_free",
-            "valid_until": "2025-12-31"
-        },
-        {
-            "title": "Group Booking Offer",
-            "description": "15% discount for group bookings (min. 10 people)",
+            "title": "Weekend Team Package",
+            "description": "15% extra discount for team bookings on weekends",
             "discount": 15,
-            "valid_until": "2025-12-31"
+            "valid_until": "2025-12-31",
+            "applicable_slots": "all",
+            "applicable_sports": ["Football", "Cricket", "Basketball", "Volleyball"],
+            "requires_team": True,
+            "active": True
+        },
+        {
+            "title": "Night Owl Special",
+            "description": "30% off on late night slots (10 PM - 12 AM)",
+            "discount": 30,
+            "valid_until": "2025-12-31",
+            "applicable_slots": ["22:00-23:00", "23:00-00:00"],
+            "applicable_sports": ["Football", "Cricket", "Basketball", "Tennis", "Badminton", "Volleyball"],
+            "active": True
+        },
+        {
+            "title": "Large Group Discount",
+            "description": "25% off for team bookings with 10+ players",
+            "discount": 25,
+            "valid_until": "2025-12-31",
+            "applicable_slots": "all",
+            "applicable_sports": ["Football", "Cricket", "Basketball", "Volleyball"],
+            "requires_team": True,
+            "min_players": 10,
+            "active": True
         }
     ]
 

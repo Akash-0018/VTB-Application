@@ -15,6 +15,8 @@ def create_token(user_id):
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        # Let app.py and utils.cors_handler handle preflight CORS
+
         print("🔒 Checking authentication token...")
         token = request.headers.get('Authorization')
         if not token:

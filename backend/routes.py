@@ -1,6 +1,7 @@
 from flask import jsonify, request, g
 from extensions import app, db, mail
 from models import User, Booking, TurfConfig, Testimonial, ActivityLog, SiteStats, TimeSlot
+from utils.cors import cors_handler
 from flask_mail import Message
 from twilio.rest import Client
 from datetime import datetime, date, timedelta
@@ -176,6 +177,59 @@ def login():
 # ============================================================================
 # FRONTEND API ENDPOINTS (Main endpoints your frontend needs)
 # ============================================================================
+
+@app.route('/api/stats', methods=['GET'])
+def get_site_stats():
+    """Get site statistics for frontend display"""
+    try:
+        # Get real stats from database
+        total_customers = User.query.filter_by(is_admin=False).count()
+        total_bookings = Booking.query.count()
+        avg_rating = db.session.query(func.avg(Testimonial.rating)).scalar() or 5.0
+
+        return jsonify({
+            'data_source': 'real',
+            'total_customers': total_customers,
+            'total_bookings': total_bookings,
+            'average_rating': round(float(avg_rating), 1)
+        }), 200
+    except Exception as e:
+        print(f"Error fetching stats: {str(e)}")
+        return jsonify({
+            'data_source': 'default',
+            'total_customers': 500,
+            'total_bookings': 1200,
+            'average_rating': 5.0
+        }), 200
+
+@app.route('/api/testimonials', methods=['GET'])
+def get_testimonials():
+    """Get approved testimonials for frontend display"""
+    try:
+        testimonials = Testimonial.query.filter_by(is_approved=True).limit(6).all()
+        return jsonify([testimonial.to_dict() for testimonial in testimonials]), 200
+    except Exception as e:
+        print(f"Error fetching testimonials: {str(e)}")
+        return jsonify([]), 200
+
+@app.route('/api/live-activity', methods=['GET'])
+def get_live_activity():
+    """Get recent activity for frontend display"""
+    try:
+        activities = ActivityLog.query.order_by(ActivityLog.created_at.desc()).limit(5).all()
+        activity_list = []
+        for activity in activities:
+            user = User.query.get(activity.user_id) if activity.user_id else None
+            activity_list.append({
+                'user': user.name if user else 'Anonymous',
+                'action': activity.action_description,
+                'time': activity.get_time_ago(),
+                'sport': activity.sport
+            })
+        return jsonify(activity_list), 200
+    except Exception as e:
+        print(f"Error fetching live activity: {str(e)}")
+        return jsonify([]), 200
 
 @app.route('/api/turf-config', methods=['GET'])
 def get_turf_config():
@@ -523,6 +577,7 @@ Please review and confirm this booking in the admin dashboard.
 
 @app.route('/api/bookings/user', methods=['GET'])
 @token_required
+@cors_handler
 def get_user_bookings():
     """Get user's bookings"""
     try:

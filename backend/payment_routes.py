@@ -3,16 +3,22 @@ from extensions import db
 from models import TurfConfig, Booking
 from datetime import datetime
 from auth import token_required
+from utils.cors import cors_handler
 
 @token_required
+@cors_handler
 def calculate_price():
     """Calculate the price for a booking with applicable discounts"""
     try:
+        print("Headers received:", dict(request.headers))
+        print("Method:", request.method)
+        print("Content-Type:", request.content_type)
+        
         if not request.is_json:
             return jsonify({'message': 'Missing JSON in request'}), 400
 
         data = request.json
-        print("Received data:", data)  # Debug log
+        print("Received data for price calculation:", data)  # Debug log
 
         required_fields = ['sport', 'date', 'timeSlot']
         for field in required_fields:
@@ -24,86 +30,7 @@ def calculate_price():
         if not turf_config:
             return jsonify({'message': 'Turf configuration not found'}), 500
 
-        # Get base price from config based on time and day
-        booking_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
-        time_slot = data['timeSlot'].split(' - ')[0]  # Get start time
-        start_time = datetime.strptime(time_slot, '%H:%M').time()
-
-        # Determine if it's a weekend
-        is_weekend = booking_date.weekday() >= 5
-        price_category = 'weekend' if is_weekend else 'weekday'
-
-        # Get time category
-        if start_time.hour < 12:
-            time_period = 'morning'
-        elif start_time.hour < 16:
-            time_period = 'afternoon'
-        else:
-            time_period = 'evening'
-
-        # Get base price from configuration
-        base_price = 1000  # Default price
-        if turf_config.price_details and price_category in turf_config.price_details:
-            if time_period in turf_config.price_details[price_category]:
-                base_price = int(turf_config.price_details[price_category][time_period].split()[0])
-
-        # Calculate discounts
-        discounts = []
-        final_amount = base_price
-
-        # Early bird discount
-        if start_time.hour >= 6 and start_time.hour < 10:
-            discount = int(base_price * 0.20)
-            discounts.append({
-                'name': 'Early Bird Discount',
-                'description': '20% off for morning slots',
-                'amount': discount
-            })
-            final_amount -= discount
-
-        # Team booking discount
-        if data.get('team'):
-            discount = int(base_price * 0.10)
-            discounts.append({
-                'name': 'Team Booking Discount',
-                'description': '10% off for team bookings',
-                'amount': discount
-            })
-            final_amount -= discount
-
-        # Weekend discount
-        if is_weekend:
-            discount = int(base_price * 0.15)
-            discounts.append({
-                'name': 'Weekend Special',
-                'description': '15% off for weekend bookings',
-                'amount': discount
-            })
-            final_amount -= discount
-
-        return jsonify({
-            'basePrice': base_price,
-            'discounts': discounts,
-            'finalAmount': final_amount,
-            'currency': 'INR',
-            'upiDetails': {
-                'id': 'akashgunasekar585@ybl',
-                'name': 'Akash G',
-                'merchantCode': 'TURFZONE001'
-            }
-        })
-
-    except Exception as e:
-        print(f"Error in calculate_price: {str(e)}")
-        return jsonify({'message': f'Error calculating price: {str(e)}'}), 500
-    try:
-        data = request.json
-        turf_config = TurfConfig.query.first()
-        if not turf_config:
-            return jsonify({'message': 'Turf configuration not found'}), 500
-
-        # Get base price from config
-        price_details = turf_config.price_details
+        # Parse date and time
         booking_date = datetime.strptime(data['date'], '%Y-%m-%d')
         start_time = datetime.strptime(data['timeSlot'].split(' - ')[0], '%H:%M').time()
 
@@ -119,9 +46,15 @@ def calculate_price():
         else:
             time_category = 'evening'
 
-        base_price = int(price_details[price_category][time_category].split()[0])  # Extract number from "1000 INR/hour"
+        # Get base price for the sport and time slot
+        price_details = turf_config.price_details
+        if data['sport'] not in price_details:
+            return jsonify({'message': f'Pricing not configured for sport: {data["sport"]}'}), 400
+
+        base_price = int(price_details[data['sport']][price_category])
+        print(f"Base price: {base_price}")  # Debug log
         
-        # Initialize discounts list
+        # Initialize discounts list and final amount
         discounts = []
         final_amount = base_price
 
@@ -134,18 +67,9 @@ def calculate_price():
                 'amount': discount_amount
             })
             final_amount -= discount_amount
+            print(f"Applied Early Bird Discount: -{discount_amount}")  # Debug log
 
-        # Apply Weekend Package Discount
-        if is_weekend and data.get('team'):  # Team bookings on weekends
-            discount_amount = int(base_price * 0.15)  # 15% off
-            discounts.append({
-                'name': 'Weekend Team Discount',
-                'description': '15% off for team bookings on weekends',
-                'amount': discount_amount
-            })
-            final_amount -= discount_amount
-
-        # Apply Late Night Discount (after 10 PM)
+        # Apply Night Owl Discount (after 10 PM)
         if start_time.hour >= 22:
             discount_amount = int(base_price * 0.30)  # 30% off
             discounts.append({
@@ -154,39 +78,69 @@ def calculate_price():
                 'amount': discount_amount
             })
             final_amount -= discount_amount
+            print(f"Applied Night Owl Discount: -{discount_amount}")  # Debug log
 
-        # Apply Group Booking Discount
+        # Apply Team/Group Booking Discount
         if data.get('team'):
-            discount_amount = int(base_price * 0.10)  # 10% off
+            # Base team discount
+            team_discount = int(base_price * 0.10)  # 10% off
             discounts.append({
-                'name': 'Group Booking Discount',
+                'name': 'Team Booking Discount',
                 'description': '10% off for team bookings',
-                'amount': discount_amount
+                'amount': team_discount
             })
-            final_amount -= discount_amount
+            final_amount -= team_discount
+            print(f"Applied Team Discount: -{team_discount}")  # Debug log
 
-        # Apply any special offers from turf config
+            # Additional weekend team discount
+            if is_weekend:
+                weekend_team_discount = int(base_price * 0.15)  # 15% off
+                discounts.append({
+                    'name': 'Weekend Team Discount',
+                    'description': '15% off for team bookings on weekends',
+                    'amount': weekend_team_discount
+                })
+                final_amount -= weekend_team_discount
+                print(f"Applied Weekend Team Discount: -{weekend_team_discount}")  # Debug log
+
+        # Apply special offers from turf config
         if turf_config.special_offers:
             for offer in turf_config.special_offers:
-                if offer.get('active', True):  # Only apply active offers
-                    if _is_offer_applicable(offer, data):
-                        discount_amount = int(base_price * float(offer.get('discount_percentage', 0)) / 100)
+                if offer.get('active', True) and _is_offer_applicable(offer, data):
+                    discount_percentage = float(offer.get('discount_percentage', 0))
+                    if discount_percentage > 0:
+                        discount_amount = int(base_price * discount_percentage / 100)
                         discounts.append({
                             'name': offer['title'],
                             'description': offer['description'],
                             'amount': discount_amount
                         })
                         final_amount -= discount_amount
+                        print(f"Applied Special Offer {offer['title']}: -{discount_amount}")  # Debug log
 
-        return jsonify({
+        # Ensure final amount doesn't go below minimum charge (20% of base price)
+        minimum_charge = int(base_price * 0.20)
+        if final_amount < minimum_charge:
+            final_amount = minimum_charge
+            print(f"Applied minimum charge floor: {minimum_charge}")  # Debug log
+
+        # Prepare response
+        response_data = {
             'basePrice': base_price,
             'discounts': discounts,
             'finalAmount': final_amount,
-            'currency': 'INR'
-        })
+            'currency': 'INR',
+            'upiDetails': {
+                'id': 'akashgunasekar585@ybl',
+                'name': 'Akash G',
+                'merchantCode': 'TURFZONE001'
+            }
+        }
+        print(f"Final price calculation: {response_data}")  # Debug log
+        return jsonify(response_data)
 
     except Exception as e:
-        print(f"Error calculating price: {str(e)}")
+        print(f"Error in calculate_price: {str(e)}")
         return jsonify({'message': f'Error calculating price: {str(e)}'}), 500
 
 @token_required
